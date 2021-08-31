@@ -4,6 +4,7 @@ env:
   secrets-manager:
     JENKINS_API_USERNAME: jenkins_config:JENKINS_API_USERNAME
     JENKINS_API_TOKEN: jenkins_config:JENKINS_API_TOKEN
+    LOGIN: SonarQube:sonartoken
 
 phases:
   install:
@@ -21,6 +22,38 @@ phases:
     commands:
       #- mvn --no-transfer-progress versions:set -DnewVersion=$STAMP
       - mvn --no-transfer-progress -s settings.xml clean package deploy
+      
+      - |
+        if [[ "$CODEBUILD_WEBHOOK_EVENT" == "PUSH" && "$CODEBUILD_WEBHOOK_HEAD_REF" == "refs/heads/master" ]]; then
+          echo "MASTER Branch Analysis"
+          BRANCH=$(echo $CODEBUILD_WEBHOOK_TRIGGER | cut -d"/" -f2)
+          echo $BRANCH
+          docker run --rm \
+          -e LOGIN=$LOGIN \
+          -e BRANCH=$BRANCH \
+          -e PR=$PR \
+          -v $(pwd):/usr/src:rw \
+          -w "/usr/src" \
+          $SONAR_IMAGE sonar-scanner \
+          -Dsonar.login=$LOGIN \
+          -Dsonar.branch.name=$BRANCH
+        else
+           echo "Pull Request Analysis"
+           PR=$(echo $CODEBUILD_WEBHOOK_TRIGGER | tr -d "pr/")
+           echo $PR
+           docker run --rm \
+           -e LOGIN=$LOGIN \
+           -e CODEBUILD_WEBHOOK_HEAD_REF=$CODEBUILD_WEBHOOK_HEAD_REF \
+           -e CODEBUILD_WEBHOOK_BASE_REF=$CODEBUILD_WEBHOOK_BASE_REF \
+           -e PR=$PR \
+           -v $(pwd):/usr/src:rw \
+           -w "/usr/src" \
+           $SONAR_IMAGE sonar-scanner \
+           -Dsonar.login=$LOGIN \
+           -Dsonar.pullrequest.key=$PR \
+           -Dsonar.pullrequest.branch=$CODEBUILD_WEBHOOK_HEAD_REF \
+           -Dsonar.pullrequest.base=master
+        fi
   post_build: 
     commands: 
 
